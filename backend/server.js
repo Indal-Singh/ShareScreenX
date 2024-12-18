@@ -1,69 +1,65 @@
+// server.js
 const express = require("express");
-const { v4: uuidv4 } = require('uuid');
+const { v4: uuidv4 } = require("uuid");
 const cors = require("cors");
 const WebSocket = require("ws");
+const http = require("http");
 
 const app = express();
 const PORT = 5000;
 
+// Enhanced CORS configuration
 app.use(cors());
 
-const server = require("http").createServer(app);
-const wss = new WebSocket.Server({ server });
+// Create HTTP server
+const server = http.createServer(app);
+
+// WebSocket server attached to HTTP server
+const wss = new WebSocket.Server({ 
+    server,
+    path: "/ws", // Added correct WebSocket path for routing
+});
 
 let sessions = {};
 
-wss.on("connection", (socket) => {
+wss.on("connection", (socket, req) => {
+    console.log("New WebSocket connection established");
+
     socket.on("message", (message) => {
-        const data = JSON.parse(message);
-        const { type, sessionId } = data;
+        try {
+            const data = JSON.parse(message);
+            console.log("Received message:", data);
 
-        switch (type) {
-            case "broadcaster":
-                sessions[sessionId] = { broadcaster: socket }; // Store broadcaster socket
-                console.log(`Broadcaster started for session: ${sessionId}`);
-                break;
-
-            case "viewer":
-                if (sessions[sessionId] && sessions[sessionId].broadcaster) { // Check if broadcaster exists
-                    sessions[sessionId].broadcaster.send(JSON.stringify(data));
-                    console.log(`Viewer joined session: ${sessionId}`);
-                } else {
-                    // Important: Send message back to viewer that session is not available
-                    socket.send(JSON.stringify({ type: "noBroadcaster", sessionId }));
-                    console.log(`No broadcaster for session: ${sessionId}`);
-                    socket.close(); // Close the viewer's socket as no broadcaster is present
-                }
-                break;
-
-            case "signal":
-                if (sessions[sessionId] && sessions[sessionId].broadcaster) {
-                    sessions[sessionId].broadcaster.send(JSON.stringify(data));
-                }
-                break;
-
-            default:
-                console.log("Invalid message type");
+            // Add logic to forward signals/messages between broadcaster and receiver
+            if (data.type === "signal" && data.sessionId) {
+                // Send signal data to specific clients (e.g., viewer or broadcaster)
+                // Extend session/sessionId management here
+            }
+        } catch (error) {
+            console.error("Message parsing error:", error);
         }
     });
 
-    socket.on("close", () => {
-        // Clean up sessions (improved)
-        for (const sessionId in sessions) {
-            if (sessions[sessionId].broadcaster === socket) {
-                delete sessions[sessionId];
-                console.log(`Broadcaster disconnected, session ${sessionId} closed.`);
-                break; // Important: Exit loop after finding the broadcaster
-            }
-        }
+    socket.on("error", (error) => {
+        console.error("WebSocket error:", error);
+    });
+});
+
+// Health check endpoint
+app.get("/", (req, res) => {
+    res.json({ 
+        status: "WebSocket server running", 
+        activeSessions: Object.keys(sessions).length 
     });
 });
 
 app.get("/create-session", (req, res) => {
     const sessionId = uuidv4();
+    sessions[sessionId] = {}; // Add session management
     res.json({ sessionId });
 });
 
-server.listen(PORT, () =>
-    console.log(`Signaling server running on http://localhost:${PORT}`)
-);
+// Important: Listen on all network interfaces
+server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+});

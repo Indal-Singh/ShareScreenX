@@ -3,77 +3,111 @@ import SimplePeer from "simple-peer";
 
 function Receiver({ sessionId }) {
     const videoRef = useRef(null);
-    const [peer, setPeer] = useState(null);
-    const [socket, setSocket] = useState(null); // Store socket in state
+    const socketRef = useRef(null);
+    const peerRef = useRef(null); // Prevent duplicate peer creation
+    const [connectionStatus, setConnectionStatus] = useState("Connecting");
 
     useEffect(() => {
-        let currentPeer;
-        let socketInstance;
+        const connectWebSocket = () => {
+            // Cleanup old socket if it exists before retrying
+            if (socketRef.current) {
+                console.warn("Closing existing WebSocket before retry.");
+                socketRef.current.close();
+                socketRef.current = null; // Clear reference
+            }
 
-        const initializeSocket = () => {
-            socketInstance = new WebSocket("ws://localhost:5000");
-            setSocket(socketInstance); // Update socket state
+            const socket = new WebSocket("ws://localhost:5000/ws");
 
-            console.log("Receiver sessionId:", sessionId);
-            console.log("Socket state on mount:", socketInstance.readyState);
+            socket.onopen = () => {
+                console.log("Receiver WebSocket connected");
+                setConnectionStatus("Connected");
 
-            socketInstance.onopen = () => {
-                console.log("WebSocket connection opened");
-                socketInstance.send(JSON.stringify({ type: "viewer", sessionId }));
+                socket.send(
+                    JSON.stringify({
+                        type: "viewer",
+                        sessionId,
+                    })
+                );
             };
 
-            socketInstance.onerror = (error) => {
-                console.error("WebSocket error:", error);
-            };
-
-            socketInstance.onclose = () => {
-                console.log("WebSocket connection closed");
-            };
-
-            socketInstance.onmessage = (message) => {
-                const data = JSON.parse(message.data);
-                if (data.type === "signal") {
-                    if (!currentPeer) {
-                        createPeer();
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === "signal") {
+                        handleSignal(data.signal);
+                    } else if (data.type === "noBroadcaster") {
+                        setConnectionStatus("No Broadcaster Available");
+                    } else {
+                        console.log("Unhandled message type:", data.type);
                     }
-                    currentPeer.signal(data.signal);
-                }
-                if (data.type === "noBroadcaster") {
-                    alert("No broadcaster available for this session.")
+                } catch (error) {
+                    console.error("Message processing error:", error);
                 }
             };
-        }
-        initializeSocket();
 
-        const createPeer = () => {
-            currentPeer = new SimplePeer({ initiator: false, trickle: false });
+            socket.onerror = (error) => {
+                console.error("Receiver WebSocket error:", error);
+                setConnectionStatus("Connection Failed");
+            };
 
-            currentPeer.on('error', err => console.error('peer error', err));
-            currentPeer.on('signal', signal => {
-                console.log("Sending Signal:", signal);
-                if (socketInstance && socketInstance.readyState === WebSocket.OPEN) {
-                    socketInstance.send(JSON.stringify({ type: 'signal', sessionId, signal }));
-                } else {
-                    console.error("Socket is not open. Cannot send signal.");
+            socket.onclose = () => {
+                if (socketRef.current) {
+                    console.warn("WebSocket disconnected. Retrying...");
+                    setTimeout(connectWebSocket, 3000); // Retry connection
                 }
-            });
-            currentPeer.on('stream', stream => {
-                if (videoRef.current) videoRef.current.srcObject = stream;
-            });
-            setPeer(currentPeer);
+                setConnectionStatus("Disconnected");
+            };
+
+            socketRef.current = socket;
         };
 
-        return () => {
-            console.log("Cleaning up Receiver component");
-            if (currentPeer) {
-                currentPeer.destroy();
+        const handleSignal = (signal) => {
+            if (peerRef.current) {
+                console.warn("Peer already exists, skipping re-initialization.");
+                return;
             }
-            if (socketInstance) {
-                socketInstance.close();
-                socketInstance.onopen = null;
-                socketInstance.onmessage = null;
-                socketInstance.onerror = null;
-                socketInstance.onclose = null;
+
+            const peer = new SimplePeer({
+                initiator: false,
+                trickle: false,
+            });
+
+            peer.on("signal", (peerSignal) => {
+                socketRef.current?.send(
+                    JSON.stringify({
+                        type: "signal",
+                        sessionId,
+                        signal: peerSignal,
+                    })
+                );
+            });
+
+            peer.on("stream", (stream) => {
+                if (videoRef.current) {
+                    videoRef.current.srcObject = stream;
+                    setConnectionStatus("Stream Active");
+                }
+            });
+
+            peer.on("error", (error) => {
+                console.error("Peer connection error:", error);
+                setConnectionStatus("Connection Failed");
+            });
+
+            peer.signal(signal);
+            peerRef.current = peer; // Track peer to prevent duplicates
+        };
+
+        connectWebSocket();
+
+        return () => {
+            if (socketRef.current) {
+                socketRef.current.close();
+                socketRef.current = null; // Clear on unmount
+            }
+            if (peerRef.current) {
+                peerRef.current.destroy();
+                peerRef.current = null; // Clear on unmount
             }
         };
     }, [sessionId]);
@@ -81,7 +115,13 @@ function Receiver({ sessionId }) {
     return (
         <div>
             <h2>Receiver</h2>
-            <video ref={videoRef} autoPlay playsInline style={{ width: "100%" }} />
+            <div>Connection Status: {connectionStatus}</div>
+            <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                style={{ width: "100%", backgroundColor: "black" }}
+            />
         </div>
     );
 }

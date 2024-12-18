@@ -5,7 +5,6 @@ import SimplePeer from "simple-peer";
 function Receiver({ sessionId }) {
     const videoRef = useRef(null);
     const [socket, setSocket] = useState(null);
-    const [connectionStatus, setConnectionStatus] = useState("Connecting");
     const peerRef = useRef(null);
 
     useEffect(() => {
@@ -17,14 +16,22 @@ function Receiver({ sessionId }) {
             socketInstance.emit("joinSession", { type: "viewer", sessionId });
         });
 
-        socketInstance.on("joinedSession", (data) => {
-            console.log("Viewer session confirmed:", data);
-            setConnectionStatus("Connected");
-        });
-
         socketInstance.on("signal", ({ senderId, signal }) => {
             if (!peerRef.current) {
-                const peer = new SimplePeer({ initiator: false, trickle: false });
+                const peer = new SimplePeer({
+                    initiator: false,
+                    trickle: false,
+                    config: {
+                        iceServers: [
+                            { urls: "stun:stun.l.google.com:19302" },
+                            {
+                                urls: "turn:your-turn-server-url",
+                                username: "your-username",
+                                credential: "your-credential",
+                            },
+                        ],
+                    },
+                });
 
                 peer.on("signal", (peerSignal) => {
                     socketInstance.emit("signal", {
@@ -34,30 +41,30 @@ function Receiver({ sessionId }) {
                 });
 
                 peer.on("stream", (stream) => {
-                    videoRef.current.srcObject = stream;
-                    setConnectionStatus("Stream Active");
+                    console.log("🎥 Stream received:", stream);
+                    if (videoRef.current) videoRef.current.srcObject = stream;
                 });
 
                 peerRef.current = peer;
             }
+
+            // Handle incoming signaling data
             peerRef.current.signal(signal);
         });
 
         return () => {
             socketInstance.disconnect();
+            if (peerRef.current) {
+                peerRef.current.destroy();
+                peerRef.current = null;
+            }
         };
     }, [sessionId]);
 
     return (
         <div>
             <h2>Receiver</h2>
-            <div>Connection Status: {connectionStatus}</div>
-            <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                style={{ width: "100%", backgroundColor: "black" }}
-            />
+            <video ref={videoRef} autoPlay playsInline style={{ width: "100%", backgroundColor: "black" }} />
         </div>
     );
 }

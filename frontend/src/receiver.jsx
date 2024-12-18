@@ -1,70 +1,70 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
-import SimplePeer from "simple-peer";
 
 function Receiver({ sessionId }) {
-    const videoRef = useRef(null);
     const [socket, setSocket] = useState(null);
-    const peerRef = useRef(null);
+    const videoRef = useRef(null);
+    const peerRef = useRef(null); // Single PeerConnection
+    const [remoteStream, setRemoteStream] = useState(new MediaStream()); // Empty MediaStream
 
     useEffect(() => {
         const socketInstance = io("http://localhost:5000");
         setSocket(socketInstance);
 
-        socketInstance.on("connect", () => {
-            console.log("👁 Receiver connected:", socketInstance.id);
-            socketInstance.emit("joinSession", { type: "viewer", sessionId });
+        // Join the room as a viewer
+        socketInstance.emit("joinRoom", sessionId);
+
+        // Create RTCPeerConnection
+        const peer = new RTCPeerConnection({
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+            ],
         });
 
-        socketInstance.on("signal", ({ senderId, signal }) => {
-            if (!peerRef.current) {
-                const peer = new SimplePeer({
-                    initiator: false,
-                    trickle: false,
-                    config: {
-                        iceServers: [
-                            { urls: "stun:stun.l.google.com:19302" },
-                            {
-                                urls: "turn:your-turn-server-url",
-                                username: "your-username",
-                                credential: "your-credential",
-                            },
-                        ],
-                    },
-                });
-
-                peer.on("signal", (peerSignal) => {
-                    socketInstance.emit("signal", {
-                        targetId: senderId,
-                        signal: peerSignal,
-                    });
-                });
-
-                peer.on("stream", (stream) => {
-                    console.log("🎥 Stream received:", stream);
-                    if (videoRef.current) videoRef.current.srcObject = stream;
-                });
-
-                peerRef.current = peer;
+        // Handle ICE candidates from the Broadcaster
+        peer.onicecandidate = ({ candidate }) => {
+            if (candidate) {
+                socketInstance.emit("signal", { roomId: sessionId, targetId: sessionId, data: candidate });
             }
+        };
 
-            // Handle incoming signaling data
-            peerRef.current.signal(signal);
+        // Handle remote tracks and attach them to the video element
+        peer.ontrack = (event) => {
+            console.log("Received remote stream:", event.streams[0]);
+            setRemoteStream(event.streams[0]); // Update state with the incoming stream
+        };
+
+        // Handle incoming signaling data
+        socketInstance.on("signal", async ({ senderId, data }) => {
+            if (data.type === "offer") {
+                await peer.setRemoteDescription(new RTCSessionDescription(data));
+                const answer = await peer.createAnswer();
+                await peer.setLocalDescription(answer);
+                socketInstance.emit("signal", { roomId: sessionId, targetId: senderId, data: answer });
+            } else if (data.candidate) {
+                await peer.addIceCandidate(new RTCIceCandidate(data));
+            }
         });
+
+        peerRef.current = peer;
 
         return () => {
             socketInstance.disconnect();
-            if (peerRef.current) {
-                peerRef.current.destroy();
-                peerRef.current = null;
-            }
+            peer.close();
         };
     }, [sessionId]);
 
+    // Attach remoteStream to the video element when it updates
+    useEffect(() => {
+        if (videoRef.current) {
+            videoRef.current.srcObject = remoteStream;
+        }
+    }, [remoteStream]);
+
     return (
         <div>
-            <h2>Receiver</h2>
-            <video ref={videoRef} autoPlay playsInline style={{ width: "100%", backgroundColor: "black" }} />
+            <h2>Receiving Broadcast from Session: {sessionId}</h2>
+            <video ref={videoRef} autoPlay playsInline style={{ width: "100%" }} />
         </div>
     );
 }

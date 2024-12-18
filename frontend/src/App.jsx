@@ -3,35 +3,39 @@ import Broadcaster from "./broadcaster";
 import Receiver from "./receiver";
 
 function App() {
-  const [isBroadcaster, setIsBroadcaster] = useState(null);
-  const [sessionId, setSessionId] = useState("");
+    const [role, setRole] = useState(null);
+    const [sessionId, setSessionId] = useState("");
 
-  const startSession = async () => {
-    const res = await fetch("http://localhost:5000/create-session");
-    const data = await res.json();
-    setSessionId(data.sessionId);
-    setIsBroadcaster(true);
-  };
+    const createSession = () => {
+        const id = prompt("Enter session ID to create:");
+        if (id) {
+            setSessionId(id);
+            setRole("broadcaster");
+        }
+    };
 
-  const joinSession = () => {
-    setIsBroadcaster(false);
-  };
+    const joinSession = () => {
+        const id = prompt("Enter session ID to join:");
+        if (id) {
+            setSessionId(id);
+            setRole("receiver");
+        }
+    };
 
-  return (
-    <div>
-      <h1>ShareScreenX</h1>
-      {!isBroadcaster && sessionId === "" && (
-        <>
-          <button onClick={startSession}>Start Sharing</button>
-          <button onClick={() => setSessionId(prompt("Enter session ID"))}>
-            Join Session
-          </button>
-        </>
-      )}
-      {isBroadcaster && <Broadcaster sessionId={sessionId} />}
-      {sessionId && !isBroadcaster && <Receiver sessionId={sessionId} />}
-    </div>
-  );
+    return (
+        <div>
+            {!role ? (
+                <>
+                    <button onClick={createSession}>Start a Broadcast</button>
+                    <button onClick={joinSession}>Join a Broadcast</button>
+                </>
+            ) : role === "broadcaster" ? (
+                <Broadcaster sessionId={sessionId} />
+            ) : (
+                <Receiver sessionId={sessionId} />
+            )}
+        </div>
+    );
 }
 
 export default App;

@@ -1,83 +1,88 @@
 const express = require("express");
-const { v4: uuidv4 } = require("uuid");
-const cors = require("cors");
-const WebSocket = require("ws");
 const http = require("http");
+const { Server } = require("socket.io");
+const { v4: uuidv4 } = require("uuid");
+const cors = require('cors');
 
 const app = express();
 const PORT = 5000;
 
-// Enhanced CORS configuration
-app.use(cors());
-
-// Create HTTP server
+// HTTP server
 const server = http.createServer(app);
 
-// WebSocket server attached to HTTP server
-const wss = new WebSocket.Server({ 
-    server,
-    path: "/ws", // Added correct WebSocket path for routing
+// Attach Socket.IO to the server
+const io = new Server(server, {
+    cors: {
+        origin: "*", // Allow all origins for testing; restrict in production
+    },
 });
 
 let sessions = {};
 
-wss.on("connection", (socket, req) => {
-    console.log("New WebSocket connection established");
+// Handle Socket.IO connections
+io.on("connection", (socket) => {
+    console.log("✅ A new client connected:", socket.id);
 
-    // Track active sockets for disconnection purposes
-    const remoteAddress = req.socket.remoteAddress;
-    console.log(`Client connected: ${remoteAddress}`);
-    
-    socket.on("message", (message) => {
-        try {
-            const data = JSON.parse(message);
-            console.log("Received message:", data);
+    // Handle joining a session
+    socket.on("joinSession", (data) => {
+        const { type, sessionId } = data;
 
-            if (data.type === "signal" && data.sessionId) {
-                // Your logic to manage connections/messages between broadcaster and viewer
-                console.log(`Signal message received for session ${data.sessionId}`);
-            }
-        } catch (error) {
-            console.error("Message parsing error:", error);
+        if (!sessions[sessionId]) {
+            sessions[sessionId] = { broadcaster: null, viewers: [] };
+        }
+
+        if (type === "broadcaster") {
+            sessions[sessionId].broadcaster = socket.id;
+            console.log(`🎥 Broadcaster joined session: ${sessionId}`);
+        } else if (type === "viewer") {
+            sessions[sessionId].viewers.push(socket.id);
+            console.log(`👁 Viewer joined session: ${sessionId}`);
+        }
+
+        // Notify all clients in the session about the update
+        io.to(socket.id).emit("joinedSession", { sessionId });
+    });
+
+    // Handle signaling messages
+    socket.on("signal", (data) => {
+        const { targetId, signal } = data;
+
+        if (targetId) {
+            io.to(targetId).emit("signal", {
+                senderId: socket.id,
+                signal,
+            });
         }
     });
 
-    // Handle WebSocket errors
-    socket.on("error", (error) => {
-        console.error(`WebSocket error from ${remoteAddress}:`, error);
-    });
+    // Handle disconnection
+    socket.on("disconnect", () => {
+        console.log(`❌ Client disconnected: ${socket.id}`);
 
-    // Handle WebSocket disconnections
-    socket.on("close", (code, reason) => {
-        console.log(`Client disconnected: ${remoteAddress}`);
-        console.log(`Disconnection reason: ${reason} (Code: ${code})`);
-
-        // Optionally, clean up resources for disconnected clients or sessions
-        Object.keys(sessions).forEach((sessionId) => {
-            if (sessions[sessionId][remoteAddress]) {
-                delete sessions[sessionId][remoteAddress];
-                console.log(`Removed disconnected client from session ${sessionId}`);
+        // Clean up sessions
+        for (const sessionId in sessions) {
+            const session = sessions[sessionId];
+            if (session.broadcaster === socket.id) {
+                delete sessions[sessionId]; // Remove the entire session
+                console.log(`🎬 Session ended: ${sessionId}`);
+            } else {
+                const viewerIndex = session.viewers.indexOf(socket.id);
+                if (viewerIndex !== -1) {
+                    session.viewers.splice(viewerIndex, 1);
+                    console.log(`👁 Viewer left session: ${sessionId}`);
+                }
             }
-        });
+        }
     });
 });
-
-// Health check endpoint
-app.get("/", (req, res) => {
-    res.json({ 
-        status: "WebSocket server running", 
-        activeSessions: Object.keys(sessions).length 
-    });
-});
-
-// Endpoint to create a new session
+app.use(cors());
+// Endpoint to create a session
 app.get("/create-session", (req, res) => {
     const sessionId = uuidv4();
-    sessions[sessionId] = {}; // Store session data for managing clients
     res.json({ sessionId });
 });
 
-// Listen for HTTP connections
-server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+// Start the server
+server.listen(PORT, () => {
+    console.log(`🚀 Server is running at http://localhost:${PORT}`);
 });

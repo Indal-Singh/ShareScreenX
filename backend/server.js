@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const cors = require("cors");
@@ -25,23 +24,41 @@ let sessions = {};
 wss.on("connection", (socket, req) => {
     console.log("New WebSocket connection established");
 
+    // Track active sockets for disconnection purposes
+    const remoteAddress = req.socket.remoteAddress;
+    console.log(`Client connected: ${remoteAddress}`);
+    
     socket.on("message", (message) => {
         try {
             const data = JSON.parse(message);
             console.log("Received message:", data);
 
-            // Add logic to forward signals/messages between broadcaster and receiver
             if (data.type === "signal" && data.sessionId) {
-                // Send signal data to specific clients (e.g., viewer or broadcaster)
-                // Extend session/sessionId management here
+                // Your logic to manage connections/messages between broadcaster and viewer
+                console.log(`Signal message received for session ${data.sessionId}`);
             }
         } catch (error) {
             console.error("Message parsing error:", error);
         }
     });
 
+    // Handle WebSocket errors
     socket.on("error", (error) => {
-        console.error("WebSocket error:", error);
+        console.error(`WebSocket error from ${remoteAddress}:`, error);
+    });
+
+    // Handle WebSocket disconnections
+    socket.on("close", (code, reason) => {
+        console.log(`Client disconnected: ${remoteAddress}`);
+        console.log(`Disconnection reason: ${reason} (Code: ${code})`);
+
+        // Optionally, clean up resources for disconnected clients or sessions
+        Object.keys(sessions).forEach((sessionId) => {
+            if (sessions[sessionId][remoteAddress]) {
+                delete sessions[sessionId][remoteAddress];
+                console.log(`Removed disconnected client from session ${sessionId}`);
+            }
+        });
     });
 });
 
@@ -53,13 +70,14 @@ app.get("/", (req, res) => {
     });
 });
 
+// Endpoint to create a new session
 app.get("/create-session", (req, res) => {
     const sessionId = uuidv4();
-    sessions[sessionId] = {}; // Add session management
+    sessions[sessionId] = {}; // Store session data for managing clients
     res.json({ sessionId });
 });
 
-// Important: Listen on all network interfaces
+// Listen for HTTP connections
 server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
 });

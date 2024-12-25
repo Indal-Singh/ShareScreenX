@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import io from "socket.io-client";
 
@@ -9,13 +9,14 @@ const ScreenSharing = () => {
     const [roomId, setRoomId] = useState("");
     const [joinedRoom, setJoinedRoom] = useState(false);
     const localVideoRef = useRef(null);
-    const remoteVideoRef = useRef(null);
+    const remoteVideoRefs = useRef({});
     const peerConnections = useRef({});
     const localStream = useRef(null);
     const STUN_SERVERS = {
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     };
 
+    // Function to start sharing screen
     const startStream = async () => {
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -36,27 +37,99 @@ const ScreenSharing = () => {
         }
     };
 
+    useEffect(() => {
+        if (!joinedRoom) return;
+
+        socket.on("user-connected", (userId) => {
+            console.log("User connected:", userId);
+            if (!peerConnections.current[userId]) {
+                connectToPeer(userId);
+            }
+        });
+
+        socket.on("signal", (data) => {
+            console.log("Signal received:", data);
+            if (data.type === "offer") {
+                handleOffer(data);
+            } else if (data.type === "answer") {
+                peerConnections.current[data.source].setRemoteDescription(new RTCSessionDescription(data.description));
+            } else if (data.type === "candidate") {
+                peerConnections.current[data.source].addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        });
+
+        socket.on("user-disconnected", (userId) => {
+            console.log("User disconnected:", userId);
+            if (remoteVideoRefs.current[userId]) {
+                delete remoteVideoRefs.current[userId]; // Delete video reference
+            }
+            if (peerConnections.current[userId]) {
+                peerConnections.current[userId].close(); // Close connection
+                delete peerConnections.current[userId];
+            }
+        });
+
+        return () => {
+            socket.disconnect();
+            if (localStream.current) {
+                localStream.current.getTracks().forEach((track) => track.stop());
+            }
+        };
+    }, [joinedRoom]);
+
     const handleTrack = (event, source) => {
         const [remoteStream] = event.streams;
-        remoteVideoRef.current.srcObject = remoteStream;
+        remoteVideoRefs.current[source] = remoteStream;
         console.log(`Remote track received from: ${source}`);
+    };
+
+    const connectToPeer = (peerId) => {
+        if (peerConnections.current[peerId]) return; // Avoid multiple connections
+
+        const peer = new RTCPeerConnection(STUN_SERVERS);
+        peerConnections.current[peerId] = peer;
+
+        // Add local tracks to the peer connection
+        localStream.current
+            .getTracks()
+            .forEach((track) => peer.addTrack(track, localStream.current));
+
+        // Handle ICE candidate events
+        peer.onicecandidate = (event) => {
+            if (event.candidate) {
+                socket.emit("signal", {
+                    target: peerId,
+                    type: "candidate",
+                    candidate: event.candidate,
+                });
+            }
+        };
+
+        // Handle incoming remote tracks
+        peer.ontrack = (event) => handleTrack(event, peerId);
+
+        // Create and send the offer
+        peer.createOffer().then((offer) => {
+            peer.setLocalDescription(offer);
+            socket.emit("signal", {
+                target: peerId,
+                type: "offer",
+                description: offer,
+            });
+        }).catch((error) => console.error("Error creating offer:", error));
     };
 
     const handleOffer = (data) => {
         const peer = new RTCPeerConnection(STUN_SERVERS);
         peerConnections.current[data.source] = peer;
 
-        // Add tracks from the local stream
         localStream.current
             .getTracks()
             .forEach((track) => peer.addTrack(track, localStream.current));
 
-        // Handle track events for remote peers
         peer.ontrack = (event) => handleTrack(event, data.source);
-
         peer.setRemoteDescription(new RTCSessionDescription(data.description));
 
-        // Create an answer once the offer is received and set the local description
         peer.createAnswer()
             .then((answer) => {
                 peer.setLocalDescription(answer);
@@ -69,29 +142,9 @@ const ScreenSharing = () => {
             .catch((error) => console.error("Error creating answer:", error));
     };
 
-    socket.on("signal", (data) => {
-        console.log("Signal received:", data);
-        if (data.type === "offer") {
-            handleOffer(data);
-        } else if (data.type === "answer") {
-            const peer = peerConnections.current[data.source];
-            if (peer) {
-                peer.setRemoteDescription(new RTCSessionDescription(data.description));
-            }
-        } else if (data.type === "candidate") {
-            const peer = peerConnections.current[data.source];
-            if (peer) {
-                peer.addIceCandidate(new RTCIceCandidate(data.candidate)).catch((error) =>
-                    console.error("Error adding ICE candidate:", error)
-                );
-            }
-        }
-    });
-
     const handleJoinRoom = (id, isCreate = false) => {
         if (id.trim() !== "") {
             socket.emit("join-room", id);
-            console.log("Joining room:", id);
             setJoinedRoom(true);
             setShareId(id);
             if (isCreate) {
@@ -134,7 +187,9 @@ const ScreenSharing = () => {
                 <div>
                     <h2>Share ID (Room ID): {shareId}</h2>
                     <video ref={localVideoRef} id="localVideo" autoPlay playsInline muted></video>
-                    <video ref={remoteVideoRef} id="remoteVideo" autoPlay playsInline></video>
+                    {Object.keys(remoteVideoRefs.current).map((userId) => (
+                        <video key={userId} ref={(el) => remoteVideoRefs.current[userId] = el} autoPlay playsInline></video>
+                    ))}
                 </div>
             )}
         </div>

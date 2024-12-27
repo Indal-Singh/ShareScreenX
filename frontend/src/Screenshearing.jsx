@@ -8,6 +8,7 @@ const ScreenSharing = () => {
     const [shareId, setShareId] = useState("");
     const [roomId, setRoomId] = useState("");
     const [joinedRoom, setJoinedRoom] = useState(false);
+    const [isSender, setIsSender] = useState(false);
     const localVideoRef = useRef(null);
     const remoteStreams = useRef({});
     const peerConnections = useRef({});
@@ -17,14 +18,12 @@ const ScreenSharing = () => {
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     };
 
-    // Function to start screen sharing
     const startStream = async () => {
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({
                 video: true,
                 audio: true,
             });
-
             localStream.current = stream;
             localVideoRef.current.srcObject = stream;
 
@@ -41,30 +40,26 @@ const ScreenSharing = () => {
     useEffect(() => {
         if (!joinedRoom) return;
 
-        // When a user connects
         socket.on("user-connected", (userId) => {
             console.log("User connected:", userId);
-            if (!peerConnections.current[userId]) {
+            if (isSender && !peerConnections.current[userId]) {
                 connectToPeer(userId);
             }
         });
 
-        // Handle incoming signals
         socket.on("signal", (data) => {
             console.log("Signal received:", data);
-
+            console.log(data,data.source, data.target);
             const peer = peerConnections.current[data.source];
-            if (data.type === "offer") {
+            if (data.type === "offer" && !isSender) {
                 handleOffer(data);
             } else if (data.type === "answer") {
                 peer.setRemoteDescription(new RTCSessionDescription(data.description));
             } else if (data.type === "candidate") {
                 if (peer) {
-                    // If the remote description is already set, add the candidate
                     if (peer.remoteDescription) {
                         peer.addIceCandidate(new RTCIceCandidate(data.candidate));
                     } else {
-                        // Otherwise, queue the candidate for later
                         if (!candidateQueues.current[data.source]) {
                             candidateQueues.current[data.source] = [];
                         }
@@ -76,8 +71,6 @@ const ScreenSharing = () => {
             }
         });
 
-
-        // Handle user disconnections
         socket.on("user-disconnected", (userId) => {
             console.log("User disconnected:", userId);
             if (remoteStreams.current[userId]) {
@@ -95,14 +88,12 @@ const ScreenSharing = () => {
                 localStream.current.getTracks().forEach((track) => track.stop());
             }
         };
-    }, [joinedRoom]);
+    }, [joinedRoom, isSender]);
 
-    // Handle incoming remote tracks
     const handleTrack = (event, source) => {
         const [remoteStream] = event.streams;
         remoteStreams.current[source] = remoteStream;
 
-        // Set video element's srcObject dynamically
         const videoElement = document.getElementById(`remoteVideo-${source}`);
         if (videoElement) {
             videoElement.srcObject = remoteStream;
@@ -117,14 +108,16 @@ const ScreenSharing = () => {
         const peer = new RTCPeerConnection(STUN_SERVERS);
         peerConnections.current[peerId] = peer;
 
-        // Add local tracks to the peer connection
-        localStream.current
-            .getTracks()
-            .forEach((track) => peer.addTrack(track, localStream.current));
+        if (isSender && localStream.current) {
+            localStream.current
+                .getTracks()
+                .forEach((track) => peer.addTrack(track, localStream.current));
+        }
 
-        // Handle ICE candidate events
         peer.onicecandidate = (event) => {
             if (event.candidate) {
+                console.log("Sending ICE as candidate candidate to:", peerId);
+                
                 socket.emit("signal", {
                     target: peerId,
                     type: "candidate",
@@ -133,50 +126,43 @@ const ScreenSharing = () => {
             }
         };
 
-        // Handle incoming remote tracks
         peer.ontrack = (event) => handleTrack(event, peerId);
 
-        // Add a queue to handle delayed ICE candidates
-        peer.oniceconnectionstatechange = () => {
-            if (peer.iceConnectionState === "connected") {
-                console.log(`Peer connection with ${peerId} established`);
-            }
-        };
-
-        // Create and send the offer
-        peer.createOffer()
-            .then((offer) => {
-                peer.setLocalDescription(offer);
-                socket.emit("signal", {
-                    target: peerId,
-                    type: "offer",
-                    description: offer,
-                });
-            })
-            .catch((error) => console.error("Error creating offer:", error));
+        if (isSender) {
+            console.log("Creating offer for:", peerId);
+            
+            peer.createOffer()
+                .then((offer) => {
+                    peer.setLocalDescription(offer);
+                    socket.emit("signal", {
+                        target: peerId,
+                        type: "offer",
+                        description: offer,
+                    });
+                })
+                .catch((error) => console.error("Error creating offer:", error));
+        }
     };
 
     const handleOffer = (data) => {
+        console.log(data);
         const peer = new RTCPeerConnection(STUN_SERVERS);
         peerConnections.current[data.source] = peer;
 
-        if (localStream.current) {
-            localStream.current
-                .getTracks()
-                .forEach((track) => peer.addTrack(track, localStream.current));
-        }
+        peer.onicecandidate = (event) => {
+            if (event.candidate) {
+                socket.emit("signal", {
+                    target: data.source,
+                    type: "candidate",
+                    candidate: event.candidate,
+                });
+            }
+        };
+
+        peer.ontrack = (event) => handleTrack(event, data.source);
 
         peer.setRemoteDescription(new RTCSessionDescription(data.description))
-            .then(() => {
-                // Handle queued candidates once the remote description is set
-                if (candidateQueues.current[data.source]) {
-                    candidateQueues.current[data.source].forEach((candidate) => {
-                        peer.addIceCandidate(new RTCIceCandidate(candidate));
-                    });
-                    candidateQueues.current[data.source] = [];
-                }
-                return peer.createAnswer();
-            })
+            .then(() => peer.createAnswer())
             .then((answer) => {
                 peer.setLocalDescription(answer);
                 socket.emit("signal", {
@@ -188,31 +174,36 @@ const ScreenSharing = () => {
             .catch((error) => console.error("Error handling offer:", error));
     };
 
-    const handleJoinRoom = (id, isCreate = false) => {
+    const handleJoinRoom = (id, role) => {
         if (id.trim() !== "") {
-            socket.emit("join-room", id);
+            console.log("Joining room:", id, role);
+            // Tell server if user is a creator or viewer
+            socket.emit("join-room", { id, role });
             setJoinedRoom(true);
             setShareId(id);
-            if (isCreate) {
+            if (role === "creator") {
                 startStream();
             }
         }
     };
-
+    
+    // For Room Creator
     const handleCreateRoom = () => {
         const newRoomId = uuidv4();
         setShareId(newRoomId);
-        handleJoinRoom(newRoomId, true);
+        setIsSender(true);
+        handleJoinRoom(newRoomId, "creator"); // Pass role as 'creator'
     };
-
-    const handleJoinExistingRoom = () => {
+    
+    // For Viewers to Join
+    const handleJoinAsViewer = () => {
         if (roomId.trim() !== "") {
-            handleJoinRoom(roomId, false);
+            handleJoinRoom(roomId, "viewer"); // Pass role as 'viewer'
         } else {
             alert("Please enter a valid Room ID.");
         }
     };
-
+    
     return (
         <div>
             <h1>Screen Sharing</h1>
@@ -226,7 +217,7 @@ const ScreenSharing = () => {
                             onChange={(e) => setRoomId(e.target.value)}
                             placeholder="Enter Room ID to Join"
                         />
-                        <button onClick={handleJoinExistingRoom}>Join Room</button>
+                        <button onClick={handleJoinAsViewer}>Join as Viewer</button>
                     </div>
                 </div>
             ) : (

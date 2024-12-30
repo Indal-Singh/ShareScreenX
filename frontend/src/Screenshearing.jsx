@@ -9,6 +9,7 @@ const ScreenSharing = () => {
     const [roomId, setRoomId] = useState("");
     const [joinedRoom, setJoinedRoom] = useState(false);
     const [isSender, setIsSender] = useState(false);
+    const [isMounted, setIsmounted] = useState(false);
     const localVideoRef = useRef(null);
     const remoteStreams = useRef({});
     const peerConnections = useRef({});
@@ -38,7 +39,18 @@ const ScreenSharing = () => {
     };
 
     useEffect(() => {
+        // if(!isMounted) {
+        //     console.log("Component mounted");
+        //     setIsmounted(true);
+        //     return;
+        // }
+        console.log('joined Status', joinedRoom);
+
         if (!joinedRoom) return;
+        console.log('joined Status after', joinedRoom);
+        socket.on("connect", (sid) => {
+            console.log("Connected to socket server",sid);
+        });
 
         socket.on("user-connected", (userId) => {
             console.log("User connected:", userId);
@@ -88,7 +100,7 @@ const ScreenSharing = () => {
                 localStream.current.getTracks().forEach((track) => track.stop());
             }
         };
-    }, [joinedRoom, isSender]);
+    }, [joinedRoom, isSender,isMounted]);
 
     const handleTrack = (event, source) => {
         const [remoteStream] = event.streams;
@@ -178,7 +190,7 @@ const ScreenSharing = () => {
         if (id.trim() !== "") {
             console.log("Joining room:", id, role);
             // Tell server if user is a creator or viewer
-            socket.emit("join-room", { id, role });
+            socket.emit("join-room", { id});
             setJoinedRoom(true);
             setShareId(id);
             if (role === "creator") {

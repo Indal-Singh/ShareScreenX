@@ -44,14 +44,9 @@ const ScreenSharing = () => {
         //     setIsmounted(true);
         //     return;
         // }
-        console.log('joined Status', joinedRoom);
 
         if (!joinedRoom) return;
-        console.log('joined Status after', joinedRoom);
-        socket.on("connect", (sid) => {
-            console.log("Connected to socket server",sid);
-        });
-
+       
         socket.on("user-connected", (userId) => {
             console.log("User connected:", userId);
             if (isSender && !peerConnections.current[userId]) {
@@ -61,7 +56,6 @@ const ScreenSharing = () => {
 
         socket.on("signal", (data) => {
             console.log("Signal received:", data);
-            console.log(data,data.source, data.target);
             const peer = peerConnections.current[data.source];
             if (data.type === "offer" && !isSender) {
                 handleOffer(data);
@@ -105,12 +99,16 @@ const ScreenSharing = () => {
     const handleTrack = (event, source) => {
         const [remoteStream] = event.streams;
         remoteStreams.current[source] = remoteStream;
-
-        const videoElement = document.getElementById(`remoteVideo-${source}`);
-        if (videoElement) {
-            videoElement.srcObject = remoteStream;
+    
+        let videoElement = document.getElementById(`video-${source}`);
+        if (!videoElement) {
+            videoElement = document.createElement("video");
+            videoElement.id = `video-${source}`;
+            videoElement.autoplay = true;
+            videoElement.playsInline = true;
+            document.body.appendChild(videoElement); // Append to the DOM
         }
-
+        videoElement.srcObject = remoteStream;
         console.log(`Remote track received from: ${source}`);
     };
 
@@ -157,7 +155,7 @@ const ScreenSharing = () => {
     };
 
     const handleOffer = (data) => {
-        console.log(data);
+        console.log('offer',data);
         const peer = new RTCPeerConnection(STUN_SERVERS);
         peerConnections.current[data.source] = peer;
 
@@ -190,7 +188,7 @@ const ScreenSharing = () => {
         if (id.trim() !== "") {
             console.log("Joining room:", id, role);
             // Tell server if user is a creator or viewer
-            socket.emit("join-room", { id});
+            socket.emit("join-room", id);
             setJoinedRoom(true);
             setShareId(id);
             if (role === "creator") {
@@ -236,14 +234,6 @@ const ScreenSharing = () => {
                 <div>
                     <h2>Share ID (Room ID): {shareId}</h2>
                     <video ref={localVideoRef} id="localVideo" autoPlay playsInline muted></video>
-                    {Object.keys(remoteStreams.current).map((userId) => (
-                        <video
-                            key={userId}
-                            id={`remoteVideo-${userId}`}
-                            autoPlay
-                            playsInline
-                        ></video>
-                    ))}
                 </div>
             )}
         </div>

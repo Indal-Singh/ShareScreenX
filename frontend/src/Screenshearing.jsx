@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import io from "socket.io-client";
-import { PhoneOff, Expand,Maximize2 } from "lucide-react";
+import { PhoneOff, Expand, Maximize2, QrCode } from "lucide-react";
 
 const socket = io("http://15.235.186.205:3004");
 
@@ -11,6 +11,7 @@ const ScreenSharing = () => {
     const [joinedRoom, setJoinedRoom] = useState(false);
     const [isSender, setIsSender] = useState(false);
     const [isScreenExpanded, setIsScreenExpanded] = useState(false);
+    const [showQrModal , setShowQrModal] = useState(false);
     const localVideoRef = useRef(null);
     const remoteStreams = useRef({});
     const peerConnections = useRef({});
@@ -227,7 +228,7 @@ const ScreenSharing = () => {
             console.error('Element with ID "remoteStreamContainer" not found.');
             return;
         }
-    
+
         if (!document.fullscreenElement) {
             setIsScreenExpanded(true);
             elem.requestFullscreen().catch(err => {
@@ -305,13 +306,23 @@ const ScreenSharing = () => {
                             </div>
                         )}
                         <div className="flex justify-center mt-6 gap-4">
-                            {!isSender ? (<button onClick={toggleFullScreen}
-                                className="hover:bg-gray-200 transition-colors rounded-lg"
-                            >
-                                {
-                                        isScreenExpanded ? <Expand size={32}  className="text-gray-600 p-2" /> : <Maximize2 size={32} className="text-gray-600 p-2" />
+                            {!isSender ? (<>
+                                <button onClick={toggleFullScreen}
+                                    className="hover:bg-gray-200 transition-colors rounded-lg"
+                                >
+                                    {
+                                        isScreenExpanded ? <Expand size={32} className="text-gray-600 p-2" /> : <Maximize2 size={32} className="text-gray-600 p-2" />
                                     }
-                            </button>) : <></>}
+                                </button>
+                            </>) : <>
+                                <button
+                                    className="hover:bg-gray-200 transition-colors rounded-lg"
+                                >
+                                    {
+                                        isScreenExpanded ? <Expand size={32} className="text-gray-600 p-2" /> : <QrCode size={32}  onClick={() => setShowQrModal(true)} className="text-gray-600 p-2" />
+                                    }
+                                </button>
+                            </>}
                             <button
                                 onClick={() => window.location.reload()}
                                 className="hover:bg-red-700 transition-colors rounded-lg bg-red-600"
@@ -319,6 +330,28 @@ const ScreenSharing = () => {
                                 <PhoneOff size={32} className="p-2 text-white" />
                             </button>
                         </div>
+                        {isSender && (
+                            <div>
+                                {showQrModal && (
+                                    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center">
+                                        <div className="bg-white p-6 rounded-lg shadow-lg relative">
+                                            <button
+                                            style={{ top: '-17px', right: '-17px' }}
+                                                onClick={() => setShowQrModal(false)}
+                                                className="absolute bg-gray-800 text-white p-2 rounded-full"
+                                            >
+                                                X
+                                            </button>
+                                            <img
+                                                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${shareId}`}
+                                                alt="QR Code"
+                                                className="mx-auto"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

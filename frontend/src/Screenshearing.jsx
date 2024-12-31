@@ -98,18 +98,29 @@ const ScreenSharing = () => {
 
     const handleTrack = (event, source) => {
         const [remoteStream] = event.streams;
-        remoteStreams.current[source] = remoteStream;
     
-        let videoElement = document.getElementById(`video-${source}`);
-        if (!videoElement) {
-            videoElement = document.createElement("video");
-            videoElement.id = `video-${source}`;
-            videoElement.autoplay = true;
-            videoElement.playsInline = true;
-            document.body.appendChild(videoElement); // Append to the DOM
+        if (remoteStream) {
+            console.log('Remote stream received:', remoteStream);
+            let videoElement = document.getElementById(`video-${source}`);
+            if (!videoElement) {
+                videoElement = document.createElement('video');
+                videoElement.id = `video-${source}`;
+                videoElement.autoplay = true;
+                videoElement.playsInline = true;
+    
+                const container = document.getElementById('remoteStreamContainer');
+                container.appendChild(videoElement);
+            }
+    
+            videoElement.srcObject = remoteStream;
+    
+            // Force playback
+            videoElement.play().catch(err => console.error('Error forcing video playback:', err));
+    
+            console.log(`Video added for source: ${source}`);
+        } else {
+            console.error('No valid remote stream provided.');
         }
-        videoElement.srcObject = remoteStream;
-        console.log(`Remote track received from: ${source}`);
     };
 
     const connectToPeer = (peerId) => {
@@ -180,6 +191,7 @@ const ScreenSharing = () => {
                     type: "answer",
                     description: answer,
                 });
+                console.log("Answer sent to:", data.source);
             })
             .catch((error) => console.error("Error handling offer:", error));
     };
@@ -234,6 +246,9 @@ const ScreenSharing = () => {
                 <div>
                     <h2>Share ID (Room ID): {shareId}</h2>
                     <video ref={localVideoRef} id="localVideo" autoPlay playsInline muted></video>
+                    <div id="remoteStreamContainer">
+                        
+                    </div>
                 </div>
             )}
         </div>

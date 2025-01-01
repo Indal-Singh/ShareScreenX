@@ -2,6 +2,7 @@ import { useRef, useState, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import io from "socket.io-client";
 import { PhoneOff, Expand, Maximize2, QrCode } from "lucide-react";
+import QrScanner from 'qr-scanner';
 
 const socket = io("http://15.235.186.205:3004");
 
@@ -11,16 +12,52 @@ const ScreenSharing = () => {
     const [joinedRoom, setJoinedRoom] = useState(false);
     const [isSender, setIsSender] = useState(false);
     const [isScreenExpanded, setIsScreenExpanded] = useState(false);
-    const [showQrModal , setShowQrModal] = useState(false);
+    const [showQrModal, setShowQrModal] = useState(false);
+    const [ScanQrModal, setScanQrModal] = useState(false);
+    const [scanQrResult, setScanQrResult] = useState("");
     const localVideoRef = useRef(null);
     const remoteStreams = useRef({});
     const peerConnections = useRef({});
     const candidateQueues = useRef({});
     const localStream = useRef(null);
+    const scanQRVideoRef = useRef(null);
+    const qrScannerRef = useRef(null); 
     const STUN_SERVERS = {
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     };
 
+    const initializeScanner = () => {
+        if (scanQRVideoRef.current && !qrScannerRef.current) {
+            // Initialize QrScanner
+            qrScannerRef.current = new QrScanner(
+                scanQRVideoRef.current,
+                (result) => {
+                    console.log("Scanned QR Code:", result.data);
+                    setScanQrResult(result.data);
+                },
+                {
+                    returnDetailedScanResult: true, // Optional settings
+                }
+            );
+        }
+    };
+
+    const startScanner = () => {
+        console.log("Starting Scanning QR Code");
+        
+        if (qrScannerRef.current) {
+            qrScannerRef.current
+                .start()
+                .then(() => console.log("Scanner started"))
+                .catch((error) => console.error("Camera error:", error));
+        }
+    };
+
+    const stopScanner = () => {
+        if (qrScannerRef.current) {
+            qrScannerRef.current.stop();
+        }
+    };
     const startStream = async () => {
         try {
             const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -41,8 +78,14 @@ const ScreenSharing = () => {
     };
 
     useEffect(() => {
+        if (ScanQrModal) {
+            console.log("Scanning QR Code");
+            initializeScanner();
+            startScanner();
+        } else {
+            stopScanner();
+        }
         if (!joinedRoom) return;
-
         socket.on("user-connected", (userId) => {
             console.log("User connected:", userId);
             if (isSender && !peerConnections.current[userId]) {
@@ -83,14 +126,19 @@ const ScreenSharing = () => {
                 delete peerConnections.current[userId];
             }
         });
-
+        
         return () => {
             socket.disconnect();
             if (localStream.current) {
                 localStream.current.getTracks().forEach((track) => track.stop());
             }
+            if (qrScannerRef.current) {
+                qrScannerRef.current.destroy();
+                qrScannerRef.current = null;
+            }
+
         };
-    }, [joinedRoom, isSender]);
+    }, [joinedRoom, isSender, ScanQrModal]);
 
     const handleTrack = (event, source) => {
         const [remoteStream] = event.streams;
@@ -247,32 +295,57 @@ const ScreenSharing = () => {
         <div className="min-h-screen bg-gray-100 p-8">
             <div className="max-w-4xl mx-auto">
                 <h1 className="text-3xl font-bold text-gray-800 mb-8">Screen Sharing</h1>
-
                 {!joinedRoom ? (
-                    <div className="bg-white rounded-lg shadow-md p-6">
-                        <button
-                            onClick={handleCreateRoom}
-                            className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors mb-6"
-                        >
-                            Create Room & Share
-                        </button>
-
-                        <div className="space-y-4">
-                            <input
-                                type="text"
-                                value={roomId}
-                                onChange={(e) => setRoomId(e.target.value)}
-                                placeholder="Enter Room ID to Join"
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
+                    <>
+                        <div className="bg-white rounded-lg shadow-md p-6">
                             <button
-                                onClick={handleJoinAsViewer}
-                                className="w-full bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 transition-colors"
+                                onClick={handleCreateRoom}
+                                className="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors mb-6"
                             >
-                                Join as Viewer
+                                Create Room & Share
                             </button>
+
+                            <div className="space-y-4">
+                                <input
+                                    type="text"
+                                    value={roomId}
+                                    onChange={(e) => setRoomId(e.target.value)}
+                                    placeholder="Enter Room ID to Join"
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                                <button
+                                    onClick={handleJoinAsViewer}
+                                    className="w-full bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 transition-colors"
+                                >
+                                    Join as Viewer
+                                </button>
+                                <button
+                                    onClick={() => setScanQrModal(true)}
+                                    className="w-full bg-yellow-600 text-white py-3 px-6 rounded-lg hover:bg-yellow-700 transition-colors"
+                                >
+                                    Scan QR Code to Join
+                                </button>
+                            </div>
                         </div>
-                    </div>
+
+                        {/* model for QR Code Scanner */}
+                        <div>
+                            {ScanQrModal && (
+                                <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center">
+                                    <div className="bg-white p-6 rounded-lg shadow-lg relative">
+                                        <button
+                                            style={{ top: '-17px', right: '-17px' }}
+                                            onClick={() => setScanQrModal(false)}
+                                            className="absolute bg-gray-800 text-white p-2 rounded-full"
+                                        >
+                                            X
+                                        </button>
+                                        <video ref={scanQRVideoRef} className="w-60"></video>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </>
                 ) : (
                     <div className="bg-white rounded-lg shadow-md p-6">
                         <div className="flex justify-between items-center mb-6">
@@ -319,7 +392,7 @@ const ScreenSharing = () => {
                                     className="hover:bg-gray-200 transition-colors rounded-lg"
                                 >
                                     {
-                                        isScreenExpanded ? <Expand size={32} className="text-gray-600 p-2" /> : <QrCode size={32}  onClick={() => setShowQrModal(true)} className="text-gray-600 p-2" />
+                                        isScreenExpanded ? <Expand size={32} className="text-gray-600 p-2" /> : <QrCode size={32} onClick={() => setShowQrModal(true)} className="text-gray-600 p-2" />
                                     }
                                 </button>
                             </>}
@@ -336,7 +409,7 @@ const ScreenSharing = () => {
                                     <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center">
                                         <div className="bg-white p-6 rounded-lg shadow-lg relative">
                                             <button
-                                            style={{ top: '-17px', right: '-17px' }}
+                                                style={{ top: '-17px', right: '-17px' }}
                                                 onClick={() => setShowQrModal(false)}
                                                 className="absolute bg-gray-800 text-white p-2 rounded-full"
                                             >

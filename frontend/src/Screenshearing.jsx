@@ -34,6 +34,7 @@ const ScreenSharing = () => {
                 (result) => {
                     console.log("Scanned QR Code:", result.data);
                     setScanQrResult(result.data);
+                    setRoomId(result.data);
                 },
                 {
                     returnDetailedScanResult: true, // Optional settings

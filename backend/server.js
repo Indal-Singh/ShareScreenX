@@ -14,7 +14,7 @@ const io = new Server(server, {
   },
 });
 
-const PORT = 3004;
+const PORT = 3100;
 
 // Store users in a room
 const rooms = {};

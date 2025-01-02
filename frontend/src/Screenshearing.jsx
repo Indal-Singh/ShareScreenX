@@ -14,7 +14,6 @@ const ScreenSharing = () => {
     const [isScreenExpanded, setIsScreenExpanded] = useState(false);
     const [showQrModal, setShowQrModal] = useState(false);
     const [ScanQrModal, setScanQrModal] = useState(false);
-    const [scanQrResult, setScanQrResult] = useState("");
     const localVideoRef = useRef(null);
     const remoteStreams = useRef({});
     const peerConnections = useRef({});
@@ -33,11 +32,12 @@ const ScreenSharing = () => {
                 scanQRVideoRef.current,
                 (result) => {
                     console.log("Scanned QR Code:", result.data);
-                    setScanQrResult(result.data);
                     setRoomId(result.data);
+                    setScanQrModal(false);
+                    handleJoinAsViewer();
                 },
                 {
-                    returnDetailedScanResult: true, // Optional settings
+                    returnDetailedScanResult: true, 
                 }
             );
         }

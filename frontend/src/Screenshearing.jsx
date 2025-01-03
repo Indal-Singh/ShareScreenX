@@ -4,7 +4,7 @@ import io from "socket.io-client";
 import { PhoneOff, Expand, Maximize2, QrCode } from "lucide-react";
 import QrScanner from 'qr-scanner';
 
-const socket = io("https://sharescreenx.sockets.indalsingh.dev");
+const socket = io("https://sharescreenx-sockets.indalsingh.dev");
 
 const ScreenSharing = () => {
     const [shareId, setShareId] = useState("");
